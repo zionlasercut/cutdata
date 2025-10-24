@@ -3,109 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>雷射切割機參數動態讀取（本機檔案）</title>
+  <title>雷射切割機參數動態讀取</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 1rem;
-    }
-    select {
-      font-size: 1rem;
-      padding: 0.5rem;
-      margin: 0.5rem 0;
-    }
-    .table-container {
-      overflow-x: auto;
-      margin-top: 1rem;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      min-width: 600px;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 0.5rem;
-      text-align: center;
-    }
-    th {
-      background: #f0f0f0;
-    }
+    body { font-family: Arial,sans-serif; margin:1rem; }
+    select { font-size:1rem; padding:.5rem; margin:.5rem 0; }
+    .table-container { overflow-x:auto; margin-top:1rem; }
+    table { border-collapse:collapse; width:100%; min-width:400px; }
+    th, td { border:1px solid #ccc; padding:.5rem; text-align:center; }
+    th { background:#f0f0f0; }
   </style>
-  <!-- 引入 SheetJS -->
+  <!-- SheetJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <h1>雷射切割機參數動態讀取</h1>
 
-  <label for="sheetSelect">選擇機種（工作表）：</label><br>
-  <select id="sheetSelect">
-    <option value="">-- 請載入後選擇 --</option>
+  <label for="machineSelect">選擇機種：</label><br>
+  <select id="machineSelect">
+    <option value="">-- 請選擇 --</option>
   </select>
 
   <div id="tableArea" class="table-container"></div>
 
   <script>
-    const sheetSelect = document.getElementById('sheetSelect');
+    // 固定的機種清單
+    const machines = ["Lasercut 1","Lasercut 2","Lasercut 3","XTool P2"];
+    const sel = document.getElementById('machineSelect');
     const tableArea = document.getElementById('tableArea');
-    let workbook = null;
+    let sheetData = null;  // 二維陣列
 
-    // 啟動時載入同目錄下的 Laser.xlsx
-    window.addEventListener('DOMContentLoaded', async () => {
+    // 1. 先把下拉選單填好
+    machines.forEach(m=>{
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    });
+
+    // 2. 讀取同目錄下 Data sheet
+    window.addEventListener('DOMContentLoaded', async ()=>{
       try {
         const resp = await fetch('Laser.xlsx');
-        if (!resp.ok) throw new Error('無法載入 Laser.xlsx: ' + resp.status);
-        const arrayBuffer = await resp.arrayBuffer();
-        workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        // 填入下拉選單
-        workbook.SheetNames.forEach(name => {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          sheetSelect.appendChild(opt);
-        });
-      } catch (err) {
-        tableArea.textContent = '載入失敗：' + err.message;
+        if(!resp.ok) throw new Error(resp.statusText);
+        const ab = await resp.arrayBuffer();
+        const wb = XLSX.read(ab, {type:'array'});
+        const ws = wb.Sheets["Data"];
+        if(!ws) throw new Error("找不到工作表 Data");
+        sheetData = XLSX.utils.sheet_to_json(ws, {header:1});
+      } catch(err) {
+        tableArea.textContent = "載入失敗： " + err.message;
       }
     });
 
-    // 選擇工作表後顯示表格
-    sheetSelect.addEventListener('change', () => {
-      const name = sheetSelect.value;
+    // 3. 使用者選機種後，從 sheetData 抽出該機種的「刀壓」「速度」兩欄
+    sel.addEventListener('change', ()=>{
       tableArea.innerHTML = '';
-      if (!name || !workbook) return;
-      const sheet = workbook.Sheets[name];
-      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-      if (data.length === 0) {
-        tableArea.textContent = '此工作表無資料';
+      const m = sel.value;
+      if(!m || !sheetData) return;
+
+      const headers = sheetData[0];
+      // indexOf 找到機種所在的欄位
+      const idx = headers.indexOf(m);
+      if(idx < 0) {
+        tableArea.textContent = "工作表中沒有「" + m + "」這個標題";
         return;
       }
-      // 建立 HTML 表格
+      // 假設「刀壓」「速度」連續兩欄
+      const cols = [0, idx, idx+1];  
+
+      // 建 table
       const tbl = document.createElement('table');
       const thead = document.createElement('thead');
-      const tbody = document.createElement('tbody');
-
-      // 表頭
-      const headerRow = document.createElement('tr');
-      data[0].forEach(cell => {
+      const trh = document.createElement('tr');
+      cols.forEach(i=>{
         const th = document.createElement('th');
-        th.textContent = cell || '';
-        headerRow.appendChild(th);
+        th.textContent = headers[i] || '';
+        trh.appendChild(th);
       });
-      thead.appendChild(headerRow);
+      thead.appendChild(trh);
+      tbl.appendChild(thead);
 
-      // 表身
-      data.slice(1).forEach(row => {
+      const tbody = document.createElement('tbody');
+      sheetData.slice(1).forEach(row=>{
         const tr = document.createElement('tr');
-        data[0].forEach((_, idx) => {
+        cols.forEach(i=>{
           const td = document.createElement('td');
-          td.textContent = row[idx] != null ? row[idx] : '';
+          td.textContent = row[i]!=null? row[i] : '';
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
       });
-
-      tbl.appendChild(thead);
       tbl.appendChild(tbody);
       tableArea.appendChild(tbl);
     });
