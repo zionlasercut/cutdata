@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>雷射切割機參數動態讀取（本機檔案）</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 1rem;
+    }
+    select {
+      font-size: 1rem;
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+    }
+    .table-container {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 600px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+      text-align: center;
+    }
+    th {
+      background: #f0f0f0;
+    }
+  </style>
+  <!-- 引入 SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>雷射切割機參數動態讀取</h1>
+
+  <label for="sheetSelect">選擇機種（工作表）：</label><br>
+  <select id="sheetSelect">
+    <option value="">-- 請載入後選擇 --</option>
+  </select>
+
+  <div id="tableArea" class="table-container"></div>
+
+  <script>
+    const sheetSelect = document.getElementById('sheetSelect');
+    const tableArea = document.getElementById('tableArea');
+    let workbook = null;
+
+    // 啟動時載入同目錄下的 Laser.xlsx
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const resp = await fetch('Laser.xlsx');
+        if (!resp.ok) throw new Error('無法載入 Laser.xlsx: ' + resp.status);
+        const arrayBuffer = await resp.arrayBuffer();
+        workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        // 填入下拉選單
+        workbook.SheetNames.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          sheetSelect.appendChild(opt);
+        });
+      } catch (err) {
+        tableArea.textContent = '載入失敗：' + err.message;
+      }
+    });
+
+    // 選擇工作表後顯示表格
+    sheetSelect.addEventListener('change', () => {
+      const name = sheetSelect.value;
+      tableArea.innerHTML = '';
+      if (!name || !workbook) return;
+      const sheet = workbook.Sheets[name];
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      if (data.length === 0) {
+        tableArea.textContent = '此工作表無資料';
+        return;
+      }
+      // 建立 HTML 表格
+      const tbl = document.createElement('table');
+      const thead = document.createElement('thead');
+      const tbody = document.createElement('tbody');
+
+      // 表頭
+      const headerRow = document.createElement('tr');
+      data[0].forEach(cell => {
+        const th = document.createElement('th');
+        th.textContent = cell || '';
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      // 表身
+      data.slice(1).forEach(row => {
+        const tr = document.createElement('tr');
+        data[0].forEach((_, idx) => {
+          const td = document.createElement('td');
+          td.textContent = row[idx] != null ? row[idx] : '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      tbl.appendChild(thead);
+      tbl.appendChild(tbody);
+      tableArea.appendChild(tbl);
+    });
+  </script>
+</body>
+</html>
