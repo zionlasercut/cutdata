@@ -69,7 +69,7 @@
     area.innerHTML = '<p>請選擇工作表。</p>';
 
     // 3. 工作表選擇後，截「最左 5 欄」+「到最後一列有資料」再輸出
-    sel.addEventListener('change', ()=>{
+    sel.aEventListener('change', ()=>{
       if (!sel.value) return;
       const ws = wb.Sheets[sel.value];
       if (!ws || !ws['!ref']) {
@@ -104,7 +104,7 @@
       // 產生 HTML（不再額外帶 range，因為已重寫 !ref）
       const html = XLSX.utils.sheet_to_html(ws2, {
         cellStyles: true,
-        dateNF: 'MM/DD/YYYY',
+        dateNF: 'DD/MM/YYYY',
         id: 'sheetjs',
         editable: false
       });
@@ -116,3 +116,4 @@
 </body>
 
 </html>
+
