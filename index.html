@@ -1,18 +1,39 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>雷射切割機參數動態讀取</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Lasercut 機參數</title>
   <style>
-    body { font-family: Arial, sans-serif; padding:1rem; }
-    label, select { font-size:1rem; }
-    select { padding:.4rem; margin:.5rem 0; }
-    .table-container { margin-top:1rem; overflow-x:auto; }
-    table { border-collapse:collapse; width:100%; min-width:400px; }
-    th, td { border:1px solid #ccc; padding:.5rem; }
-    th { background:#f0f0f0; }
+    body { font-family: Arial, sans-serif; padding:1rem }
+    label, select { font-size:1rem }
+    select { padding:.4rem; margin:.5rem 0 }
+    .table-container { margin-top:1rem; overflow-x:auto }
+
+    /* 針對 sheet_to_html 產出的 table */
+    #sheetjs {
+      border-collapse: collapse;
+      /* 不指定固定寬度，讓欄寬自動最窄貼合內容 */
+      table-layout: auto;
+    }
+    #sheetjs th,
+    #sheetjs td {
+      border:1px solid #ccc;
+      padding:.5rem;
+      text-align:center;
+      /* 若 Excel 沒有給底色，就讓 CSS 條紋生效 */
+      background-color: transparent;
+    }
+    #sheetjs th {
+      background:#f0f0f0;
+    }
+    /* 隔行染色：偶數行淡灰 */
+    #sheetjs tr:nth-child(even) td {
+      background-color: #fafafa;
+    }
   </style>
+
+  <!-- 引入 SheetJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -28,141 +49,59 @@
   </div>
 
   <script>
-    const sheetSelect = document.getElementById('sheetSelect');
-    const tableArea   = document.getElementById('tableArea');
-    let workbook      = null;
-    const MAX_COLS    = 5;  // 只讀前 5 欄
+  (async ()=>{
+    const sel  = document.getElementById('sheetSelect');
+    const area = document.getElementById('tableArea');
+    let wb;
+    const MAX_COLS = 5;  // 最左 5 欄
 
-    // 工具：將 Excel RGB (ARGB) 轉成 CSS 顏色 (#RRGGBB)
-    function toCssColor(argb) {
-      if (!argb) return '';
-      // ARGB 例如 "FF00FF00" => "#00FF00"
-      return '#' + argb.slice(-6);
-    }
-
-    // 工具：套用 cell.s 風格到元素
-    function applyStyle(el, style) {
-      if (!style) return;
-      // 填色
-      if (style.fill && style.fill.fgColor && style.fill.fgColor.rgb) {
-        el.style.backgroundColor = toCssColor(style.fill.fgColor.rgb);
-      }
-      // 字型
-      if (style.font) {
-        if (style.font.color && style.font.color.rgb) {
-          el.style.color = toCssColor(style.font.color.rgb);
-        }
-        if (style.font.bold)   el.style.fontWeight = 'bold';
-        if (style.font.italic) el.style.fontStyle  = 'italic';
-        if (style.font.underline) el.style.textDecoration = 'underline';
-        if (style.font.sz) el.style.fontSize = style.font.sz + 'px';
-        if (style.font.name) el.style.fontFamily = style.font.name;
-      }
-      // 對齊
-      if (style.alignment) {
-        if (style.alignment.horizontal) el.style.textAlign = style.alignment.horizontal;
-        if (style.alignment.vertical)   el.style.verticalAlign = style.alignment.vertical;
-      }
-      // 邊框 (簡單只取 color 且線寬固定1px)
-      if (style.border) {
-        ['top','bottom','left','right'].forEach(side => {
-          const br = style.border[side];
-          if (br && br.color && br.color.rgb) {
-            el.style['border-'+side] = '1px solid ' + toCssColor(br.color.rgb);
-          }
-        });
-      }
-    }
-
-    // 1. 載入 Laser.xlsx
-    window.addEventListener('DOMContentLoaded', async () => {
-      try {
-        const res = await fetch('Laser.xlsx');
-        if (!res.ok) throw new Error(res.statusText);
-        const ab = await res.arrayBuffer();
-        workbook = XLSX.read(ab, {
-          type: 'array',
-          cellStyles: true,  // 啟用讀取樣式
-          cellDates: true    // 啟用讀取日期
-        });
-      } catch (err) {
-        tableArea.innerHTML = `<p style="color:red">無法讀取 Laser.xlsx：${err.message}</p>`;
-        return;
-      }
-      // 填入工作表名稱
-      sheetSelect.innerHTML = '<option value="">── 請選擇 ──</option>';
-      workbook.SheetNames.forEach(name => {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        sheetSelect.appendChild(opt);
+    // 1. 讀 Laser.xlsx
+    try {
+      const res = await fetch('Laser.xlsx');
+      if (!res.ok) throw new Error(res.statusText);
+      const ab = await res.arrayBuffer();
+      wb = XLSX.read(ab, {
+        type: 'array',
+        cellStyles: true,
+        cellDates:  true
       });
-      sheetSelect.disabled = false;
-      tableArea.innerHTML = '<p>請從上方下拉選擇要顯示的工作表。</p>';
-    });
+    } catch(err) {
+      area.innerHTML = `<p style="color:red">讀取失敗：${err.message}</p>`;
+      return;
+    }
 
-    // 2. 當工作表被選擇
-    sheetSelect.addEventListener('change', () => {
-      tableArea.innerHTML = '';
-      const name = sheetSelect.value;
-      if (!name) return;
+    // 2. 填下拉選單
+    sel.innerHTML = '<option value="">── 請選擇 ──</option>';
+    wb.SheetNames.forEach(name => sel.appendChild(new Option(name, name)));
+    sel.disabled = false;
+    area.innerHTML = '<p>請選一個工作表。</p>';
 
-      const ws = workbook.Sheets[name];
+    // 3. 選擇後用 sheet_to_html 並套用自適欄寬和隔行
+    sel.addEventListener('change', ()=>{
+      if (!sel.value) return;
+      const ws = wb.Sheets[sel.value];
       if (!ws || !ws['!ref']) {
-        tableArea.innerHTML = `<p>工作表「${name}」沒有資料。</p>`;
+        area.innerHTML = `<p>這個工作表沒有資料。</p>`;
         return;
       }
 
-      const range = XLSX.utils.decode_range(ws['!ref']);
-      const startCol = range.s.c;
-      const endCol   = Math.min(range.s.c + MAX_COLS - 1, range.e.c);
+      // 計算最左 5 欄的範圍
+      const rg     = XLSX.utils.decode_range(ws['!ref']);
+      const startR = rg.s.r, endR = rg.e.r;
+      const startC = rg.s.c, endC = Math.min(rg.s.c + MAX_COLS - 1, rg.e.c);
 
-      // 建表格
-      const tbl   = document.createElement('table');
-      const thead = document.createElement('thead');
-      const thr   = document.createElement('tr');
+      // 產生 HTML，cellStyles inline 內建、dateNF 格式化
+      const html = XLSX.utils.sheet_to_html(ws, {
+        range: { s:{r:startR,c:startC}, e:{r:endR,c:endC} },
+        cellStyles: true,
+        dateNF: 'DD/MM/YYYY',
+        id: 'sheetjs',
+        editable: false
+      });
 
-      // 表頭 (第一列)
-      for (let c = startCol; c <= endCol; c++) {
-        const addr = XLSX.utils.encode_cell({r: range.s.r, c});
-        const cell = ws[addr];
-        const th   = document.createElement('th');
-        th.textContent = cell && cell.v != null ? cell.v : '';
-        applyStyle(th, cell && cell.s);
-        thr.appendChild(th);
-      }
-      thead.appendChild(thr);
-      tbl.appendChild(thead);
-
-      // 表身 (第二列開始)
-      const tbody = document.createElement('tbody');
-      for (let r = range.s.r + 1; r <= range.e.r; r++) {
-        let empty = true;
-        const tr = document.createElement('tr');
-        for (let c = startCol; c <= endCol; c++) {
-          const addr = XLSX.utils.encode_cell({r, c});
-          const cell = ws[addr];
-          const td   = document.createElement('td');
-          // 處理日期格式
-          if (cell && (cell.t === 'd' || cell.v instanceof Date)) {
-            const d = new Date(cell.v);
-            const dd = String(d.getDate()).padStart(2,'0');
-            const mm = String(d.getMonth()+1).padStart(2,'0');
-            const yyyy = d.getFullYear();
-            td.textContent = `${dd}/${mm}/${yyyy}`;
-            empty = false;
-          } else if (cell && cell.v != null) {
-            td.textContent = cell.v;
-            empty = false;
-          }
-          applyStyle(td, cell && cell.s);
-          tr.appendChild(td);
-        }
-        if (!empty) tbody.appendChild(tr);
-      }
-      tbl.appendChild(tbody);
-      tableArea.appendChild(tbl);
+      area.innerHTML = html;
     });
+  })();
   </script>
 </body>
 </html>
