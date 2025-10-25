@@ -2,97 +2,164 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>雷射切割機參數動態讀取</title>
   <style>
-    body { font-family: Arial,sans-serif; margin:1rem; }
-    select { font-size:1rem; padding:.5rem; margin:.5rem 0; }
-    .table-container { overflow-x:auto; margin-top:1rem; }
+    body { font-family: Arial, sans-serif; padding:1rem; }
+    label, select { font-size:1rem; }
+    select { padding:.4rem; margin:.5rem 0; }
+    .table-container { margin-top:1rem; overflow-x:auto; }
     table { border-collapse:collapse; width:100%; min-width:400px; }
-    th, td { border:1px solid #ccc; padding:.5rem; text-align:center; }
+    th, td { border:1px solid #ccc; padding:.5rem; }
     th { background:#f0f0f0; }
   </style>
-  <!-- SheetJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <h1>雷射切割機參數動態讀取</h1>
 
-  <label for="machineSelect">選擇機種：</label><br>
-  <select id="machineSelect">
-    <option value="">-- 請選擇 --</option>
+  <label for="sheetSelect">選擇工作表：</label><br>
+  <select id="sheetSelect" disabled>
+    <option>── 載入中 ──</option>
   </select>
 
-  <div id="tableArea" class="table-container"></div>
+  <div id="tableArea" class="table-container">
+    <p>Excel 檔案載入中…</p>
+  </div>
 
   <script>
-    // 固定的機種清單
-    const machines = ["Lasercut 1","Lasercut 2","Lasercut 3","XTool P2"];
-    const sel = document.getElementById('machineSelect');
-    const tableArea = document.getElementById('tableArea');
-    let sheetData = null;  // 二維陣列
+    const sheetSelect = document.getElementById('sheetSelect');
+    const tableArea   = document.getElementById('tableArea');
+    let workbook      = null;
+    const MAX_COLS    = 5;  // 只讀前 5 欄
 
-    // 1. 先把下拉選單填好
-    machines.forEach(m=>{
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      sel.appendChild(opt);
-    });
+    // 工具：將 Excel RGB (ARGB) 轉成 CSS 顏色 (#RRGGBB)
+    function toCssColor(argb) {
+      if (!argb) return '';
+      // ARGB 例如 "FF00FF00" => "#00FF00"
+      return '#' + argb.slice(-6);
+    }
 
-    // 2. 讀取同目錄下 Data sheet
-    window.addEventListener('DOMContentLoaded', async ()=>{
-      try {
-        const resp = await fetch('Laser.xlsx');
-        if(!resp.ok) throw new Error(resp.statusText);
-        const ab = await resp.arrayBuffer();
-        const wb = XLSX.read(ab, {type:'array'});
-        const ws = wb.Sheets["Data"];
-        if(!ws) throw new Error("找不到工作表 Data");
-        sheetData = XLSX.utils.sheet_to_json(ws, {header:1});
-      } catch(err) {
-        tableArea.textContent = "載入失敗： " + err.message;
+    // 工具：套用 cell.s 風格到元素
+    function applyStyle(el, style) {
+      if (!style) return;
+      // 填色
+      if (style.fill && style.fill.fgColor && style.fill.fgColor.rgb) {
+        el.style.backgroundColor = toCssColor(style.fill.fgColor.rgb);
       }
-    });
+      // 字型
+      if (style.font) {
+        if (style.font.color && style.font.color.rgb) {
+          el.style.color = toCssColor(style.font.color.rgb);
+        }
+        if (style.font.bold)   el.style.fontWeight = 'bold';
+        if (style.font.italic) el.style.fontStyle  = 'italic';
+        if (style.font.underline) el.style.textDecoration = 'underline';
+        if (style.font.sz) el.style.fontSize = style.font.sz + 'px';
+        if (style.font.name) el.style.fontFamily = style.font.name;
+      }
+      // 對齊
+      if (style.alignment) {
+        if (style.alignment.horizontal) el.style.textAlign = style.alignment.horizontal;
+        if (style.alignment.vertical)   el.style.verticalAlign = style.alignment.vertical;
+      }
+      // 邊框 (簡單只取 color 且線寬固定1px)
+      if (style.border) {
+        ['top','bottom','left','right'].forEach(side => {
+          const br = style.border[side];
+          if (br && br.color && br.color.rgb) {
+            el.style['border-'+side] = '1px solid ' + toCssColor(br.color.rgb);
+          }
+        });
+      }
+    }
 
-    // 3. 使用者選機種後，從 sheetData 抽出該機種的「刀壓」「速度」兩欄
-    sel.addEventListener('change', ()=>{
-      tableArea.innerHTML = '';
-      const m = sel.value;
-      if(!m || !sheetData) return;
-
-      const headers = sheetData[0];
-      // indexOf 找到機種所在的欄位
-      const idx = headers.indexOf(m);
-      if(idx < 0) {
-        tableArea.textContent = "工作表中沒有「" + m + "」這個標題";
+    // 1. 載入 Laser.xlsx
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const res = await fetch('Laser.xlsx');
+        if (!res.ok) throw new Error(res.statusText);
+        const ab = await res.arrayBuffer();
+        workbook = XLSX.read(ab, {
+          type: 'array',
+          cellStyles: true,  // 啟用讀取樣式
+          cellDates: true    // 啟用讀取日期
+        });
+      } catch (err) {
+        tableArea.innerHTML = `<p style="color:red">無法讀取 Laser.xlsx：${err.message}</p>`;
         return;
       }
-      // 假設「刀壓」「速度」連續兩欄
-      const cols = [0, idx, idx+1];  
-
-      // 建 table
-      const tbl = document.createElement('table');
-      const thead = document.createElement('thead');
-      const trh = document.createElement('tr');
-      cols.forEach(i=>{
-        const th = document.createElement('th');
-        th.textContent = headers[i] || '';
-        trh.appendChild(th);
+      // 填入工作表名稱
+      sheetSelect.innerHTML = '<option value="">── 請選擇 ──</option>';
+      workbook.SheetNames.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sheetSelect.appendChild(opt);
       });
-      thead.appendChild(trh);
+      sheetSelect.disabled = false;
+      tableArea.innerHTML = '<p>請從上方下拉選擇要顯示的工作表。</p>';
+    });
+
+    // 2. 當工作表被選擇
+    sheetSelect.addEventListener('change', () => {
+      tableArea.innerHTML = '';
+      const name = sheetSelect.value;
+      if (!name) return;
+
+      const ws = workbook.Sheets[name];
+      if (!ws || !ws['!ref']) {
+        tableArea.innerHTML = `<p>工作表「${name}」沒有資料。</p>`;
+        return;
+      }
+
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const startCol = range.s.c;
+      const endCol   = Math.min(range.s.c + MAX_COLS - 1, range.e.c);
+
+      // 建表格
+      const tbl   = document.createElement('table');
+      const thead = document.createElement('thead');
+      const thr   = document.createElement('tr');
+
+      // 表頭 (第一列)
+      for (let c = startCol; c <= endCol; c++) {
+        const addr = XLSX.utils.encode_cell({r: range.s.r, c});
+        const cell = ws[addr];
+        const th   = document.createElement('th');
+        th.textContent = cell && cell.v != null ? cell.v : '';
+        applyStyle(th, cell && cell.s);
+        thr.appendChild(th);
+      }
+      thead.appendChild(thr);
       tbl.appendChild(thead);
 
+      // 表身 (第二列開始)
       const tbody = document.createElement('tbody');
-      sheetData.slice(1).forEach(row=>{
+      for (let r = range.s.r + 1; r <= range.e.r; r++) {
+        let empty = true;
         const tr = document.createElement('tr');
-        cols.forEach(i=>{
-          const td = document.createElement('td');
-          td.textContent = row[i]!=null? row[i] : '';
+        for (let c = startCol; c <= endCol; c++) {
+          const addr = XLSX.utils.encode_cell({r, c});
+          const cell = ws[addr];
+          const td   = document.createElement('td');
+          // 處理日期格式
+          if (cell && (cell.t === 'd' || cell.v instanceof Date)) {
+            const d = new Date(cell.v);
+            const dd = String(d.getDate()).padStart(2,'0');
+            const mm = String(d.getMonth()+1).padStart(2,'0');
+            const yyyy = d.getFullYear();
+            td.textContent = `${dd}/${mm}/${yyyy}`;
+            empty = false;
+          } else if (cell && cell.v != null) {
+            td.textContent = cell.v;
+            empty = false;
+          }
+          applyStyle(td, cell && cell.s);
           tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      });
+        }
+        if (!empty) tbody.appendChild(tr);
+      }
       tbl.appendChild(tbody);
       tableArea.appendChild(tbl);
     });
