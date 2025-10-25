@@ -3,37 +3,29 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Lasercut 機參數</title>
+  <title>雷射切割機參數動態讀取</title>
   <style>
     body { font-family: Arial, sans-serif; padding:1rem }
     label, select { font-size:1rem }
     select { padding:.4rem; margin:.5rem 0 }
     .table-container { margin-top:1rem; overflow-x:auto }
 
-    /* 針對 sheet_to_html 產出的 table */
+    /* 自動最窄欄寬，隔行染色 */
     #sheetjs {
       border-collapse: collapse;
-      /* 不指定固定寬度，讓欄寬自動最窄貼合內容 */
       table-layout: auto;
+      width: auto;
+      max-width: 100%;
     }
-    #sheetjs th,
-    #sheetjs td {
+    #sheetjs th, #sheetjs td {
       border:1px solid #ccc;
       padding:.5rem;
       text-align:center;
-      /* 若 Excel 沒有給底色，就讓 CSS 條紋生效 */
       background-color: transparent;
     }
-    #sheetjs th {
-      background:#f0f0f0;
-    }
-    /* 隔行染色：偶數行淡灰 */
-    #sheetjs tr:nth-child(even) td {
-      background-color: #fafafa;
-    }
+    #sheetjs th { background:#f0f0f0 }
+    #sheetjs tr:nth-child(even) td { background-color: #fafafa }
   </style>
-
-  <!-- 引入 SheetJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -53,9 +45,9 @@
     const sel  = document.getElementById('sheetSelect');
     const area = document.getElementById('tableArea');
     let wb;
-    const MAX_COLS = 5;  // 最左 5 欄
+    const MAX_COLS = 5;  // 只讀最左 5 欄
 
-    // 1. 讀 Laser.xlsx
+    // 1. 載入 Excel
     try {
       const res = await fetch('Laser.xlsx');
       if (!res.ok) throw new Error(res.statusText);
@@ -74,25 +66,43 @@
     sel.innerHTML = '<option value="">── 請選擇 ──</option>';
     wb.SheetNames.forEach(name => sel.appendChild(new Option(name, name)));
     sel.disabled = false;
-    area.innerHTML = '<p>請選一個工作表。</p>';
+    area.innerHTML = '<p>請選擇工作表。</p>';
 
-    // 3. 選擇後用 sheet_to_html 並套用自適欄寬和隔行
+    // 3. 工作表選擇後，截「最左 5 欄」+「到最後一列有資料」再輸出
     sel.addEventListener('change', ()=>{
       if (!sel.value) return;
       const ws = wb.Sheets[sel.value];
       if (!ws || !ws['!ref']) {
-        area.innerHTML = `<p>這個工作表沒有資料。</p>`;
+        area.innerHTML = `<p>此工作表無資料。</p>`;
         return;
       }
 
-      // 計算最左 5 欄的範圍
-      const rg     = XLSX.utils.decode_range(ws['!ref']);
-      const startR = rg.s.r, endR = rg.e.r;
-      const startC = rg.s.c, endC = Math.min(rg.s.c + MAX_COLS - 1, rg.e.c);
+      // 原始範圍解析
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const startR = range.s.r, endR = range.e.r;
+      const startC = range.s.c, endC = Math.min(range.s.c + MAX_COLS - 1, range.e.c);
 
-      // 產生 HTML，cellStyles inline 內建、dateNF 格式化
-      const html = XLSX.utils.sheet_to_html(ws, {
-        range: { s:{r:startR,c:startC}, e:{r:endR,c:endC} },
+      // 找出最左 5 欄中最後真正有值的列號
+      let lastDataRow = startR;
+      for (let r = startR; r <= endR; r++) {
+        for (let c = startC; c <= endC; c++) {
+          const cell = ws[XLSX.utils.encode_cell({r,c})];
+          if (cell && cell.v != null && String(cell.v).trim()!=="") {
+            lastDataRow = r;
+            break;
+          }
+        }
+      }
+
+      // 重寫工作表的 !ref，讓 sheet_to_html 只處理這小範圍
+      const newRef = XLSX.utils.encode_range({
+        s: {r: startR, c: startC},
+        e: {r: lastDataRow, c: endC}
+      });
+      const ws2 = Object.assign({}, ws, {'!ref': newRef});
+
+      // 產生 HTML（不再額外帶 range，因為已重寫 !ref）
+      const html = XLSX.utils.sheet_to_html(ws2, {
         cellStyles: true,
         dateNF: 'DD/MM/YYYY',
         id: 'sheetjs',
